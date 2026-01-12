@@ -1,0 +1,8 @@
+[package]
+name = "dm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dm_core = { path = "../dm_core" }
+clap = { workspace = true }
