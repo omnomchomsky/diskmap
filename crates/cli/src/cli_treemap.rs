@@ -267,20 +267,17 @@ impl TreeMapView {
             let name = node.name();
             let size = node.total_bytes();
             let label_width = width.saturating_sub(4);
-            let name_label = Self::truncate_name(name, label_width);
             let size_label = Self::format_size(size);
 
-            if height >= 4 && label_width >= size_label.len() {
-                // Show name and size on separate lines
-                self.draw_text(canvas, x + 2, next_content_y, &name_label, label_width, depth);
-                next_content_y += 1;
-                self.draw_text(canvas, x + 2, next_content_y, &size_label, label_width, depth);
-                next_content_y += 1;
-            } else {
-                let label = format!("{} ({})", name_label, size_label);
-                self.draw_text(canvas, x + 2, next_content_y, &label, label_width, depth);
-                next_content_y += 1;
-            }
+            // Calculate space needed for both name and size on same line
+            let size_with_parens = format!(" ({})", size_label);
+            let available_for_name = label_width.saturating_sub(size_with_parens.len());
+
+            let name_label = Self::truncate_name(name, available_for_name);
+            let label = format!("{}{}", name_label, size_with_parens);
+
+            self.draw_text(canvas, x + 2, next_content_y, &label, label_width, depth);
+            next_content_y += 1;
         }
 
         // Prepare layout items (folders and files)
@@ -312,21 +309,8 @@ impl TreeMapView {
                     depth + 1,
                 );
 
-                if !skipped.is_empty() {
-                    let file_count = skipped.iter().filter(|i| matches!(i, LayoutItem::File(_))).count();
-                    let folder_count = skipped.iter().filter(|i| matches!(i, LayoutItem::Folder(_))).count();
-                    let mut summary = String::new();
-                    if folder_count > 0 {
-                        summary.push_str(&format!("{} more folders", folder_count));
-                    }
-                    if file_count > 0 {
-                        if !summary.is_empty() { summary.push_str(", "); }
-                        summary.push_str(&format!("{} more files", file_count));
-                    }
-                    if !summary.is_empty() {
-                        self.draw_text(canvas, inner_x, y + height - 2, &format!("... and {}", summary), inner_width, depth);
-                    }
-                }
+                // Removed file summary at bottom - just skip items that don't fit
+                let _ = skipped;
             }
         }
     }
@@ -349,17 +333,16 @@ impl TreeMapView {
         if width >= 5 && height >= 3 {
             self.draw_box(canvas, x, y, width, height, depth);
             let label_width = width.saturating_sub(4);
-            let name_label = Self::truncate_name(name, label_width);
             let size_label = Self::format_size(size);
-            
-            if height >= 4 && label_width >= size_label.len() {
-                // Show name and size on separate lines
-                self.draw_text(canvas, x + 2, y + 1, &name_label, label_width, depth);
-                self.draw_text(canvas, x + 2, y + 2, &size_label, label_width, depth);
-            } else {
-                let label = format!("{} ({})", name_label, size_label);
-                self.draw_text(canvas, x + 2, y + 1, &label, label_width, depth);
-            }
+
+            // Calculate space needed for both name and size on same line
+            let size_with_parens = format!(" ({})", size_label);
+            let available_for_name = label_width.saturating_sub(size_with_parens.len());
+
+            let name_label = Self::truncate_name(name, available_for_name);
+            let label = format!("{}{}", name_label, size_with_parens);
+
+            self.draw_text(canvas, x + 2, y + 1, &label, label_width, depth);
         } else {
             // Fill with shaded characters for small files if they can't fit text
             let fill_ch = match depth % 4 {
