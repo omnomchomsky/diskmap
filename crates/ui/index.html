@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DM Vibes - Disk Space Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>DM Vibes</h1>
+            <p>Disk Space Analyzer with Treemap Visualization</p>
+        </header>
+
+        <div class="controls">
+            <div class="input-group">
+                <input type="text" id="pathInput" placeholder="Enter directory path" value="/">
+                <button id="browseBtn">Browse</button>
+            </div>
+            <div class="scan-options">
+                <label>
+                    <input type="checkbox" id="parallelScan" checked>
+                    Parallel Scan
+                </label>
+                <label>
+                    Threads: <input type="number" id="threadCount" min="1" max="16" value="4">
+                </label>
+            </div>
+            <button id="scanBtn" class="primary">Scan Directory</button>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div id="stats" class="stats hidden">
+            <div class="stat">
+                <span class="label">Total Size:</span>
+                <span id="totalSize" class="value">-</span>
+            </div>
+            <div class="stat">
+                <span class="label">Duration:</span>
+                <span id="duration" class="value">-</span>
+            </div>
+            <div class="stat">
+                <span class="label">Errors:</span>
+                <span id="errors" class="value">-</span>
+            </div>
+        </div>
+
+        <div id="treemapContainer" class="treemap-container">
+            <div id="breadcrumb" class="breadcrumb hidden"></div>
+            <svg id="treemap"></svg>
+        </div>
+
+        <div id="tooltip" class="tooltip hidden"></div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>

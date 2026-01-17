@@ -1,0 +1,278 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #1e1e1e;
+    color: #e0e0e0;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 20px;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+header h1 {
+    font-size: 2rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 5px;
+}
+
+header p {
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.controls {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.input-group {
+    display: flex;
+    gap: 10px;
+    flex: 1;
+    min-width: 300px;
+}
+
+input[type="text"] {
+    flex: 1;
+    padding: 10px 15px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 14px;
+}
+
+input[type="text"]:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+input[type="number"] {
+    width: 60px;
+    padding: 5px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+}
+
+button {
+    padding: 10px 20px;
+    background: #3a3a3a;
+    border: 1px solid #555;
+    border-radius: 6px;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+button:hover {
+    background: #4a4a4a;
+    border-color: #666;
+}
+
+button.primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    font-weight: 600;
+}
+
+button.primary:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.scan-options {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.scan-options label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+    color: #aaa;
+}
+
+.status {
+    padding: 12px;
+    background: #2a2a2a;
+    border-radius: 6px;
+    margin-bottom: 15px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    color: #888;
+}
+
+.status.scanning {
+    background: #2a3a4a;
+    color: #6fa3ef;
+}
+
+.status.error {
+    background: #4a2a2a;
+    color: #ef6f6f;
+}
+
+.status.success {
+    background: #2a4a2a;
+    color: #6fef6f;
+}
+
+.stats {
+    display: flex;
+    gap: 30px;
+    margin-bottom: 15px;
+    padding: 15px;
+    background: #2a2a2a;
+    border-radius: 6px;
+}
+
+.stats.hidden {
+    display: none;
+}
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.stat .label {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+}
+
+.stat .value {
+    font-size: 18px;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+
+.treemap-container {
+    flex: 1;
+    background: #2a2a2a;
+    border-radius: 6px;
+    padding: 15px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.breadcrumb {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: #1e1e1e;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #aaa;
+}
+
+.breadcrumb.hidden {
+    display: none;
+}
+
+.breadcrumb span {
+    cursor: pointer;
+    color: #667eea;
+}
+
+.breadcrumb span:hover {
+    text-decoration: underline;
+}
+
+.breadcrumb span::after {
+    content: ' / ';
+    color: #555;
+    cursor: default;
+}
+
+.breadcrumb span:last-child::after {
+    content: '';
+}
+
+#treemap {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.treemap-rect {
+    stroke: #1e1e1e;
+    stroke-width: 2;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.treemap-rect:hover {
+    opacity: 0.8;
+}
+
+.treemap-text {
+    pointer-events: none;
+    fill: white;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.tooltip {
+    position: fixed;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 6px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 1000;
+    border: 1px solid #444;
+}
+
+.tooltip.hidden {
+    display: none;
+}
+
+.tooltip .name {
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: #667eea;
+}
+
+.tooltip .size {
+    color: #aaa;
+}
+
+.hidden {
+    display: none;
+}

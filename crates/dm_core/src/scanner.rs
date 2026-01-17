@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use crate::fs_adapter::FsAdapter;
 use crate::model::NodeId;
 
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+
 #[derive(Debug, Clone)]
 pub struct ScanJob {
     pub path: PathBuf,
@@ -67,7 +70,23 @@ pub fn scan_one_dir(fs: &dyn FsAdapter, job: ScanJob, emit: &mut dyn FnMut(ScanE
 
         if ft.is_file() {
             let size = match entry.metadata() {
-                Ok(md) => md.len(),
+                Ok(md) => {
+                    #[cfg(unix)]
+                    {
+                        // On Unix, st_blocks is in 512-byte units
+                        md.blocks() * 512
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // Fallback: approximate with len() rounded up to 4KB blocks
+                        let len = md.len();
+                        if len == 0 {
+                            0
+                        } else {
+                            ((len + 4095) / 4096) * 4096
+                        }
+                    }
+                },
                 Err(e) => {
                     emit(ScanEvent::Error { node: parent_id, path: path, kind: e.kind() });
                     continue;

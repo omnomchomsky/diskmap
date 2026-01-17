@@ -25,6 +25,7 @@ pub trait FsAdapter: Send + Sync {
     fn is_traversable_dir(&self, e: &DirEntry, ft: &std::fs::FileType) -> io::Result<bool>;
 }
 
+#[derive(Clone)]
 pub struct UnixFsAdapter;
 
 impl FsAdapter for UnixFsAdapter {

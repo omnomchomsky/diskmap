@@ -63,4 +63,28 @@ impl Node {
     pub fn parent_id(&self) -> Option<NodeId> {
         self.parent
     }
+
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn children(&self) -> &[NodeId] {
+        &self.children
+    }
+
+    pub fn total_bytes(&self) -> u64 {
+        self.own_files_bytes + self.subtree_bytes_known
+    }
+
+    pub fn own_bytes(&self) -> u64 {
+        self.own_files_bytes
+    }
+
+    pub fn subtree_bytes(&self) -> u64 {
+        self.subtree_bytes_known
+    }
 }

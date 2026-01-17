@@ -1,5 +1,5 @@
-mod tree;
-mod model;
+pub mod tree;
+pub mod model;
 mod top_files;
 pub mod session;
 mod scanner;

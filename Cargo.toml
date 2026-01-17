@@ -2,7 +2,7 @@
 members = [
     "crates/dm_core",
     "crates/cli"
-]
+, "crates/gui"]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"]}

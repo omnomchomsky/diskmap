@@ -29,4 +29,8 @@ impl Tree {
     pub fn node_mut(&mut self, id: NodeId) -> &mut Node {
         &mut self.nodes[id]
     }
+
+    pub fn root(&self) -> NodeId {
+        self.root
+    }
 }
