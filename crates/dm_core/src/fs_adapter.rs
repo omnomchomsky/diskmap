@@ -46,9 +46,26 @@ impl FsAdapter for WindowsFsAdapter {
         std::fs::read_dir(path)
     }
 
-    fn is_traversable_dir(&self, _e: &DirEntry, ft: &std::fs::FileType) -> io::Result<bool> {
-        // TODO: treat reparse points as non-traversable.
-        // For now, this is “good enough” but not complete.
-        Ok(ft.is_dir() && !ft.is_symlink())
+    fn is_traversable_dir(&self, e: &DirEntry, ft: &std::fs::FileType) -> io::Result<bool> {
+        // Don't traverse symlinks
+        if ft.is_symlink() {
+            return Ok(false);
+        }
+
+        // On Windows, check for reparse points (junctions, symlinks, etc.)
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+            if let Ok(metadata) = e.metadata() {
+                let attrs = metadata.file_attributes();
+                if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(ft.is_dir())
     }
 }

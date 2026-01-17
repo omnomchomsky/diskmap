@@ -1,5 +1,28 @@
 use dm_core::tree::Tree;
 use dm_core::model::NodeId;
+use dm_core::top_files::FileMetaData;
+
+#[derive(Clone)]
+enum LayoutItem {
+    Folder(NodeId),
+    File(FileMetaData),
+}
+
+impl LayoutItem {
+    fn size(&self, tree: &Tree) -> u64 {
+        match self {
+            LayoutItem::Folder(id) => tree.node(*id).total_bytes(),
+            LayoutItem::File(f) => f.size,
+        }
+    }
+
+    fn clone_item(&self) -> Self {
+        match self {
+            LayoutItem::Folder(id) => LayoutItem::Folder(*id),
+            LayoutItem::File(f) => LayoutItem::File(f.clone()),
+        }
+    }
+}
 
 /// ANSI color codes for different depths
 const COLORS: &[&str] = &[
@@ -136,7 +159,7 @@ impl TreeMapView {
         canvas: &mut Vec<Vec<Cell>>,
         used_bytes: u64,
         available_bytes: u64,
-        total_bytes: u64,
+        _total_bytes: u64,
         proportional: bool,
     ) {
         let (used_width, free_width) = if proportional {
@@ -148,8 +171,19 @@ impl TreeMapView {
                 0.5
             };
 
-            let used_width = (self.width as f64 * used_ratio).ceil().max(1.0) as usize;
-            let free_width = self.width.saturating_sub(used_width);
+            let mut used_width = (self.width as f64 * used_ratio).round() as usize;
+            let mut free_width = self.width.saturating_sub(used_width);
+
+            // Ensure both sections get minimum visibility if they have data
+            const MIN_WIDTH: usize = 15;
+            if used_bytes > 0 && used_width < MIN_WIDTH {
+                used_width = MIN_WIDTH.min(self.width - MIN_WIDTH);
+                free_width = self.width.saturating_sub(used_width);
+            }
+            if available_bytes > 0 && free_width < MIN_WIDTH {
+                free_width = MIN_WIDTH.min(self.width - MIN_WIDTH);
+                used_width = self.width.saturating_sub(free_width);
+            }
 
             (used_width, free_width)
         } else {
@@ -159,7 +193,7 @@ impl TreeMapView {
         };
 
         // Render used space (the tree structure)
-        if used_width > 3 {
+        if used_width >= 3 {
             self.render_node(
                 tree,
                 root_id,
@@ -173,7 +207,7 @@ impl TreeMapView {
         }
 
         // Render free space as a simple box
-        if free_width > 3 {
+        if free_width >= 3 {
             let free_x = used_width;
             self.draw_free_space_box(canvas, free_x, 0, free_width, self.height, available_bytes);
         }
@@ -228,25 +262,48 @@ impl TreeMapView {
         self.draw_box(canvas, x, y, width, height, depth);
 
         // Add label (only if there's enough space)
+        let mut next_content_y = y + 1;
         if width > 4 && height > 2 {
             let name = node.name();
             let size = node.total_bytes();
             let label_width = width.saturating_sub(4);
-            let label = format!("{} ({})", Self::truncate_name(name, label_width), Self::format_size(size));
-            self.draw_text(canvas, x + 2, y + 1, &label, label_width, depth);
+            let name_label = Self::truncate_name(name, label_width);
+            let size_label = Self::format_size(size);
+
+            if height >= 4 && label_width >= size_label.len() {
+                // Show name and size on separate lines
+                self.draw_text(canvas, x + 2, next_content_y, &name_label, label_width, depth);
+                next_content_y += 1;
+                self.draw_text(canvas, x + 2, next_content_y, &size_label, label_width, depth);
+                next_content_y += 1;
+            } else {
+                let label = format!("{} ({})", name_label, size_label);
+                self.draw_text(canvas, x + 2, next_content_y, &label, label_width, depth);
+                next_content_y += 1;
+            }
         }
 
-        // Calculate layout for children
-        if !children.is_empty() && height > 5 && width > 6 {
-            let inner_x = x.saturating_add(2).min(canvas[0].len().saturating_sub(1));
-            let inner_y = y.saturating_add(3).min(canvas.len().saturating_sub(1));
+        // Prepare layout items (folders and files)
+        let mut items = Vec::new();
+        for &child_id in children {
+            items.push(LayoutItem::Folder(child_id));
+        }
+        let top_files = node.top_files().to_sorted_vec_desc();
+        for file in top_files {
+            items.push(LayoutItem::File(file));
+        }
+
+        // Calculate layout for children and files
+        if !items.is_empty() && height > (next_content_y - y + 2) && width > 4 {
+            let inner_x = x.saturating_add(2);
+            let inner_y = next_content_y;
             let inner_width = width.saturating_sub(4);
-            let inner_height = height.saturating_sub(5);
+            let inner_height = height.saturating_sub(next_content_y - y + 2); // Reserve 1 line for summary if needed
 
             if inner_width > 0 && inner_height > 0 {
-                self.layout_children(
+                let skipped = self.layout_children(
                     tree,
-                    children,
+                    &items,
                     canvas,
                     inner_x,
                     inner_y,
@@ -254,6 +311,86 @@ impl TreeMapView {
                     inner_height,
                     depth + 1,
                 );
+
+                if !skipped.is_empty() {
+                    let file_count = skipped.iter().filter(|i| matches!(i, LayoutItem::File(_))).count();
+                    let folder_count = skipped.iter().filter(|i| matches!(i, LayoutItem::Folder(_))).count();
+                    let mut summary = String::new();
+                    if folder_count > 0 {
+                        summary.push_str(&format!("{} more folders", folder_count));
+                    }
+                    if file_count > 0 {
+                        if !summary.is_empty() { summary.push_str(", "); }
+                        summary.push_str(&format!("{} more files", file_count));
+                    }
+                    if !summary.is_empty() {
+                        self.draw_text(canvas, inner_x, y + height - 2, &format!("... and {}", summary), inner_width, depth);
+                    }
+                }
+            }
+        }
+    }
+
+    fn render_file(
+        &self,
+        canvas: &mut Vec<Vec<Cell>>,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        depth: usize,
+        name: &str,
+        size: u64,
+    ) {
+        if width < 1 || height < 1 {
+            return;
+        }
+
+        if width >= 5 && height >= 3 {
+            self.draw_box(canvas, x, y, width, height, depth);
+            let label_width = width.saturating_sub(4);
+            let name_label = Self::truncate_name(name, label_width);
+            let size_label = Self::format_size(size);
+            
+            if height >= 4 && label_width >= size_label.len() {
+                // Show name and size on separate lines
+                self.draw_text(canvas, x + 2, y + 1, &name_label, label_width, depth);
+                self.draw_text(canvas, x + 2, y + 2, &size_label, label_width, depth);
+            } else {
+                let label = format!("{} ({})", name_label, size_label);
+                self.draw_text(canvas, x + 2, y + 1, &label, label_width, depth);
+            }
+        } else {
+            // Fill with shaded characters for small files if they can't fit text
+            let fill_ch = match depth % 4 {
+                0 => '░',
+                1 => '▒',
+                2 => '▓',
+                _ => '█',
+            };
+            for row in y..(y + height) {
+                for col in x..(x + width) {
+                    if row < canvas.len() && col < canvas[0].len() {
+                        // For small blocks, only fill if there's no text already there
+                        if canvas[row][col].ch == ' ' {
+                            canvas[row][col] = if self.use_colors {
+                                Cell::with_color(fill_ch, depth)
+                            } else {
+                                Cell::new(fill_ch)
+                            };
+                        }
+                    }
+                }
+            }
+            // Try to overlay name if possible
+            if width >= 5 && height >= 1 {
+                let label = Self::truncate_name(name, width.saturating_sub(2));
+                let label = format!("- {}", label);
+                self.draw_text(canvas, x, y, &label, width, depth);
+            } else if width >= 2 && height >= 1 {
+                // Just try to show a few chars
+                let label = Self::truncate_name(name, width);
+                self.draw_text(canvas, x, y, &label, width, depth);
             }
         }
     }
@@ -261,82 +398,107 @@ impl TreeMapView {
     fn layout_children(
         &self,
         tree: &Tree,
-        children: &[NodeId],
+        items: &[LayoutItem],
         canvas: &mut Vec<Vec<Cell>>,
         x: usize,
         y: usize,
         width: usize,
         height: usize,
         depth: usize,
-    ) {
-        if children.is_empty() || width == 0 || height == 0 {
-            return;
+    ) -> Vec<LayoutItem> {
+        if items.is_empty() || width == 0 || height == 0 {
+            return Vec::new();
         }
 
-        // Calculate total size
-        let total_size: u64 = children
+        // Calculate total size of items we are actually going to display
+        let mut sorted_items: Vec<(&LayoutItem, u64)> = items
             .iter()
-            .map(|&id| tree.node(id).total_bytes())
-            .sum();
-
-        if total_size == 0 {
-            return;
-        }
-
-        // Use squarified treemap algorithm (simplified)
-        let mut remaining_children: Vec<(NodeId, u64)> = children
-            .iter()
-            .map(|&id| (id, tree.node(id).total_bytes()))
+            .map(|item| (item, item.size(tree)))
             .filter(|(_, size)| *size > 0)
             .collect();
 
-        remaining_children.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by size descending
+        sorted_items.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by size descending
+
+        let total_display_size: u64 = sorted_items.iter().map(|(_, size)| *size).sum();
+
+        if total_display_size == 0 {
+            return Vec::new();
+        }
 
         let mut current_x = x;
         let mut current_y = y;
         let mut remaining_width = width;
         let mut remaining_height = height;
+        let mut remaining_total_size = total_display_size;
+        let mut skipped_items = Vec::new();
 
-        for (child_id, child_size) in remaining_children {
-            if remaining_width == 0 || remaining_height == 0 {
+        for (item_idx, (item, item_size)) in sorted_items.iter().enumerate() {
+            if remaining_width == 0 || remaining_height == 0 || remaining_total_size == 0 {
+                skipped_items.extend(sorted_items.iter().skip(item_idx).map(|(it, _)| (*it).clone_item()));
                 break;
             }
 
-            let ratio = child_size as f64 / total_size as f64;
+            let ratio = *item_size as f64 / remaining_total_size as f64;
 
-            // Decide direction based on aspect ratio
-            let (child_width, child_height) = if remaining_width > remaining_height {
-                // Split horizontally
-                let w = (remaining_width as f64 * ratio).max(1.0).min(remaining_width as f64) as usize;
+            // Decide direction based on aspect ratio of remaining space
+            // Terminal characters are ~2:1 (height:width) visually.
+            // Biasing heavily towards wide containers (horizontal split) when width is larger than height.
+            let (item_width, item_height) = if (remaining_width as f64) > (remaining_height as f64 * 1.5) {
+                // Split horizontally (side-by-side blocks)
+                let w = (remaining_width as f64 * ratio).round() as usize;
                 let w = w.clamp(1, remaining_width);
                 (w, remaining_height)
             } else {
-                // Split vertically
-                let h = (remaining_height as f64 * ratio).max(1.0).min(remaining_height as f64) as usize;
+                // Split vertically (stacked blocks)
+                let h = (remaining_height as f64 * ratio).round() as usize;
                 let h = h.clamp(1, remaining_height);
                 (remaining_width, h)
             };
 
-            self.render_node(
-                tree,
-                child_id,
-                canvas,
-                current_x,
-                current_y,
-                child_width,
-                child_height,
-                depth,
-            );
-
-            // Update position for next child
-            if remaining_width > remaining_height {
-                current_x += child_width;
-                remaining_width = remaining_width.saturating_sub(child_width);
+            // Check if it's too small to render anything meaningful
+            if item_width < 1 || item_height < 1 {
+                skipped_items.push((*item).clone_item());
             } else {
-                current_y += child_height;
-                remaining_height = remaining_height.saturating_sub(child_height);
+                match item {
+                    LayoutItem::Folder(child_id) => {
+                        self.render_node(
+                            tree,
+                            *child_id,
+                            canvas,
+                            current_x,
+                            current_y,
+                            item_width,
+                            item_height,
+                            depth,
+                        );
+                    }
+                    LayoutItem::File(file) => {
+                        self.render_file(
+                            canvas,
+                            current_x,
+                            current_y,
+                            item_width,
+                            item_height,
+                            depth,
+                            &file.name,
+                            file.size,
+                        );
+                    }
+                }
             }
+
+            // Update position for next child based on the SAME split decision
+            if (remaining_width as f64) > (remaining_height as f64 * 1.5) {
+                current_x += item_width;
+                remaining_width = remaining_width.saturating_sub(item_width);
+            } else {
+                current_y += item_height;
+                remaining_height = remaining_height.saturating_sub(item_height);
+            }
+            remaining_total_size = remaining_total_size.saturating_sub(*item_size);
         }
+
+        skipped_items
     }
 
     fn draw_box(
@@ -463,10 +625,14 @@ impl TreeMapView {
     fn truncate_name(name: &str, max_len: usize) -> String {
         if name.len() <= max_len {
             name.to_string()
+        } else if max_len < 1 {
+            "".to_string()
         } else if max_len < 3 {
             name.chars().take(max_len).collect()
         } else {
-            format!("{}...", name.chars().take(max_len - 3).collect::<String>())
+            // Prefer showing the beginning of the name
+            let take = max_len.saturating_sub(2);
+            format!("{}..", name.chars().take(take).collect::<String>())
         }
     }
 

@@ -10,7 +10,13 @@ use cli_treemap::TreeMapView;
 #[command(about = "Disk usage analyzer with treemap visualization", long_about = None)]
 struct Cli {
     /// Directory to analyze
-    #[arg(default_value = ".")]
+    #[cfg(windows)]
+    #[arg(default_value = "C:\\")]
+    path: String,
+
+    /// Directory to analyze
+    #[cfg(not(windows))]
+    #[arg(default_value = "/")]
     path: String,
 
     /// Display mode for the treemap
@@ -18,7 +24,7 @@ struct Cli {
     display: DisplayMode,
 
     /// Show free space on the filesystem
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = true, action = clap::ArgAction::Set)]
     free_space: bool,
 
     /// Scale blocks proportionally to actual disk usage (default: true, use --no-proportional to disable)
@@ -26,11 +32,11 @@ struct Cli {
     proportional: bool,
 
     /// Enable parallel scanning (auto-detects SSD, or specify number of threads)
-    #[arg(long, value_name = "THREADS")]
-    parallel: Option<Option<usize>>,
+    #[arg(long, value_name = "THREADS", default_value = "16")]
+    parallel: usize,
 
     /// Enable real-time visualization with live updates
-    #[arg(short = 'r', long)]
+    #[arg(short = 'r', long, default_value_t = true, action = clap::ArgAction::Set)]
     realtime: bool,
 }
 
@@ -45,98 +51,21 @@ enum DisplayMode {
 }
 
 fn get_filesystem_stats(path: &str) -> Option<(u64, u64)> {
-    #[cfg(unix)]
-    {
-        use std::ffi::CString;
-        use std::mem::MaybeUninit;
+    use std::path::Path;
 
-        let c_path = CString::new(path).ok()?;
-        let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::uninit();
+    // Use fs4 crate for cross-platform disk space queries
+    let path_obj = Path::new(path);
 
-        unsafe {
-            if libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) == 0 {
-                let stat = stat.assume_init();
-                let block_size = stat.f_frsize as u64;
-                let total_blocks = stat.f_blocks as u64;
-                let available_blocks = stat.f_bavail as u64;
+    // Try to get a canonical path, fall back to the original if that fails
+    let canonical_path = std::fs::canonicalize(path_obj).unwrap_or_else(|_| path_obj.to_path_buf());
 
-                let total_bytes = total_blocks * block_size;
-                let available_bytes = available_blocks * block_size;
-
-                return Some((total_bytes, available_bytes));
-            }
+    match fs4::statvfs(&canonical_path) {
+        Ok(stats) => {
+            let total = stats.total_space();
+            let free = stats.available_space();
+            Some((total, free))
         }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
-
-    None
-}
-
-fn is_ssd(path: &str) -> Option<bool> {
-    #[cfg(target_os = "linux")]
-    {
-        use std::fs;
-        use std::path::Path;
-
-        // Get the device for this path
-        let metadata = fs::metadata(path).ok()?;
-        let dev = metadata.dev();
-
-        // Major device number
-        let major = (dev >> 8) & 0xff;
-
-        // Try to find the device in /sys/block
-        let sys_block = fs::read_dir("/sys/block").ok()?;
-
-        for entry in sys_block.flatten() {
-            let dev_path = entry.path();
-            let dev_name = dev_path.file_name()?.to_str()?;
-
-            // Check if this is our device by reading dev file
-            let dev_file = dev_path.join("dev");
-            if let Ok(content) = fs::read_to_string(&dev_file) {
-                if content.starts_with(&format!("{}:", major)) {
-                    // Found our device, check if rotational
-                    let rotational_file = dev_path.join("queue/rotational");
-                    if let Ok(rotational) = fs::read_to_string(&rotational_file) {
-                        return Some(rotational.trim() == "0");
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-
-        // Use diskutil to check if it's an SSD
-        let output = Command::new("diskutil")
-            .args(["info", path])
-            .output()
-            .ok()?;
-
-        let stdout = String::from_utf8(output.stdout).ok()?;
-
-        // Look for "Solid State" in the output
-        if stdout.contains("Solid State: Yes") {
-            return Some(true);
-        } else if stdout.contains("Solid State: No") {
-            return Some(false);
-        }
-
-        None
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        let _ = path;
-        None
+        Err(_) => None,
     }
 }
 
@@ -176,7 +105,26 @@ fn render_live_frame(session: &Session, cli: &Cli, width: usize, height: usize, 
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Expand ~ to home directory and resolve path
+    let expanded_path = if cli.path.starts_with('~') {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            let home_str = home.to_string_lossy();
+            cli.path.replacen('~', &home_str, 1)
+        } else {
+            cli.path.clone()
+        }
+    } else {
+        cli.path.clone()
+    };
+
+    // Use dunce::canonicalize to resolve . and .. without UNC prefix on Windows
+    cli.path = match dunce::canonicalize(&expanded_path) {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => expanded_path, // Fallback to expanded path if canonicalization fails
+    };
+
     let now = std::time::Instant::now();
     let fs = UnixFsAdapter;
 
@@ -188,18 +136,7 @@ fn main() {
     };
 
     // Determine parallelism
-    let num_threads = match cli.parallel {
-        Some(Some(n)) => Some(n), // Explicit thread count
-        Some(None) => {
-            // --parallel flag without value: auto-detect based on SSD
-            match is_ssd(&cli.path) {
-                Some(true) => Some(num_cpus::get().min(8)), // SSD: use CPU cores (cap at 8)
-                Some(false) => None, // HDD: sequential
-                None => Some(4), // Unknown: use conservative default
-            }
-        }
-        None => None, // No flag: sequential
-    };
+    let num_threads = Some(cli.parallel);
 
     // Determine treemap dimensions based on display mode
     let (width, height) = match cli.display {

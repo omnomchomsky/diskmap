@@ -1,3 +1,5 @@
+
+
 [workspace]
 members = [
     "crates/dm_core",
@@ -6,6 +8,7 @@ members = [
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"]}
+fs4 = "0.13.1"
 
 resolver = "2"
 

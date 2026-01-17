@@ -4,9 +4,9 @@ use crate::model::ResourceName;
 
 #[derive(Debug, Clone)]
 pub struct FileMetaData  {
-    name: ResourceName,
-    size: u64,
-    mtime: u64
+    pub name: ResourceName,
+    pub size: u64,
+    pub mtime: u64
 }
 
 

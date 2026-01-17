@@ -87,4 +87,8 @@ impl Node {
     pub fn subtree_bytes(&self) -> u64 {
         self.subtree_bytes_known
     }
+
+    pub fn top_files(&self) -> &TopKFiles {
+        &self.top_files
+    }
 }

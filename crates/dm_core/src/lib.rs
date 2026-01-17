@@ -1,6 +1,6 @@
 pub mod tree;
 pub mod model;
-mod top_files;
+pub mod top_files;
 pub mod session;
 mod scanner;
 pub mod fs_adapter;

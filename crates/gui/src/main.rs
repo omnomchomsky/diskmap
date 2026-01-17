@@ -8,6 +8,12 @@ use dm_core::tree::Tree;
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize)]
+struct GuiFileMetaData {
+    name: String,
+    size: u64,
+}
+
+#[derive(Serialize, Deserialize)]
 struct TreeNode {
     id: usize,
     parent: Option<usize>,
@@ -15,6 +21,8 @@ struct TreeNode {
     size: u64,
     own_size: u64,
     children: Vec<usize>,
+    top_files: Vec<GuiFileMetaData>,
+    depth: usize,
 }
 
 #[derive(Serialize)]
@@ -24,6 +32,8 @@ struct ScanResult {
     total_size: u64,
     errors: u64,
     duration_ms: u64,
+    fs_total: Option<u64>,
+    fs_free: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -36,9 +46,9 @@ struct ScanProgress {
 
 fn serialize_tree(tree: &Tree, root_id: usize) -> Vec<TreeNode> {
     let mut nodes = Vec::new();
-    let mut stack = vec![root_id];
+    let mut stack = vec![(root_id, 0)];
 
-    while let Some(node_id) = stack.pop() {
+    while let Some((node_id, depth)) = stack.pop() {
         let node = tree.node(node_id);
 
         nodes.push(TreeNode {
@@ -48,14 +58,38 @@ fn serialize_tree(tree: &Tree, root_id: usize) -> Vec<TreeNode> {
             size: node.total_bytes(),
             own_size: node.own_bytes(),
             children: node.children().to_vec(),
+            top_files: node.top_files().to_sorted_vec_desc().into_iter().map(|f| GuiFileMetaData {
+                name: f.name,
+                size: f.size,
+            }).collect(),
+            depth,
         });
 
         for &child_id in node.children() {
-            stack.push(child_id);
+            stack.push((child_id, depth + 1));
         }
     }
 
     nodes
+}
+
+fn get_filesystem_stats(path: &str) -> Option<(u64, u64)> {
+    use std::path::Path;
+
+    // Use fs4 crate for cross-platform disk space queries
+    let path_obj = Path::new(path);
+
+    // Try to get a canonical path, fall back to the original if that fails
+    let canonical_path = std::fs::canonicalize(path_obj).unwrap_or_else(|_| path_obj.to_path_buf());
+
+    match fs4::statvfs(&canonical_path) {
+        Ok(stats) => {
+            let total = stats.total_space();
+            let free = stats.available_space();
+            Some((total, free))
+        }
+        Err(_) => None,
+    }
 }
 
 #[tauri::command]
@@ -65,6 +99,8 @@ async fn scan_directory(path: String) -> Result<ScanResult, String> {
 
     let path_buf: PathBuf = path.parse().map_err(|e| format!("Invalid path: {}", e))?;
     let mut session = Session::new(path_buf, 10);
+
+    let fs_stats = get_filesystem_stats(&path);
 
     // Run the scan
     session.run(&fs);
@@ -79,19 +115,23 @@ async fn scan_directory(path: String) -> Result<ScanResult, String> {
         total_size,
         errors: session.errors,
         duration_ms,
+        fs_total: fs_stats.map(|(total, _)| total),
+        fs_free: fs_stats.map(|(_, free)| free),
     })
 }
 
 #[tauri::command]
-async fn scan_directory_parallel(path: String, threads: usize) -> Result<ScanResult, String> {
+async fn scan_directory_parallel(path: String, threads: Option<usize>) -> Result<ScanResult, String> {
     let start = std::time::Instant::now();
     let fs = UnixFsAdapter;
 
     let path_buf: PathBuf = path.parse().map_err(|e| format!("Invalid path: {}", e))?;
     let mut session = Session::new(path_buf, 10);
 
+    let fs_stats = get_filesystem_stats(&path);
+
     // Run the parallel scan
-    session.run_parallel(&fs, threads);
+    session.run_parallel(&fs, threads.unwrap_or(16));
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let root_id = session.tree.root();
@@ -103,6 +143,8 @@ async fn scan_directory_parallel(path: String, threads: usize) -> Result<ScanRes
         total_size,
         errors: session.errors,
         duration_ms,
+        fs_total: fs_stats.map(|(total, _)| total),
+        fs_free: fs_stats.map(|(_, free)| free),
     })
 }
 

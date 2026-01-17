@@ -9,3 +9,5 @@ clap = { workspace = true }
 term_size = "0.3"
 libc = "0.2"
 num_cpus = "1.16"
+dunce = "1.0.5"
+fs4 = { workspace = true }
