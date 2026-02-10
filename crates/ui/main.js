@@ -1,12 +1,14 @@
 // Import Tauri API
 const { invoke } = window.__TAURI__.core;
 const { open } = window.__TAURI__.dialog;
+const { listen } = window.__TAURI__.event;
 
 console.log('Tauri API loaded:', { invoke, open });
 
 let currentData = null;
 let currentRoot = 0;
 let nodeMap = new Map();
+let renderPending = false;
 
 // DOM elements
 const pathInput = document.getElementById('pathInput');
@@ -186,11 +188,12 @@ function renderTreemap() {
     treemap.setAttribute('viewBox', `0 0 ${width} ${height}`);
     treemap.setAttribute('preserveAspectRatio', 'none');
 
+    const shouldShowFreeSpace = showFreeSpace.checked;
     // Check if we're at the actual root and have filesystem stats
     const isAtActualRoot = currentRoot === currentData.root_id;
     const hasFsStats = currentData.fs_total && currentData.fs_free;
 
-    if (isAtActualRoot && hasFsStats) {
+    if (shouldShowFreeSpace && isAtActualRoot && hasFsStats) {
         // Render with free space visualization
         const usedBytes = rootNode.size;
         const freeBytes = currentData.fs_free;
@@ -216,6 +219,15 @@ function renderTreemap() {
     }
 
     renderBreadcrumb(currentRoot);
+}
+
+function scheduleRender() {
+    if (renderPending) return;
+    renderPending = true;
+    requestAnimationFrame(() => {
+        renderPending = false;
+        renderTreemap();
+    });
 }
 
 // Render free space as a box
@@ -442,15 +454,36 @@ scanBtn.addEventListener('click', async () => {
     statusMessage.className = 'scanning';
     stats.classList.add('hidden');
 
+    let keepDisabled = false;
     try {
         const isParallel = parallelScan.checked;
         const threads = parseInt(threadCount.value) || 4;
 
         console.log('Invoking scan:', { path, isParallel, threads });
 
-        const result = isParallel
-            ? await invoke('scan_directory_parallel', { path, threads })
-            : await invoke('scan_directory', { path });
+        let result
+
+        if (isParallel) {
+            // streaming: progress comes via events; final result comes via scan_done (and/or returned)
+            keepDisabled = true;
+            scanBtn.disabled = true;
+            statusMessage.textContent = "Starting scan...";
+            statusMessage.className = "scanning";
+            stats.classList.add("hidden");
+
+            // Fire-and-forget so UI stays responsive; scan_done event will finalize UI
+            invoke("scan_directory_parallel_stream", { path, threads })
+                .catch((error) => {
+                    statusMessage.textContent = "Error: " + error;
+                    statusMessage.className = "error";
+                    scanBtn.disabled = false;
+                });
+
+            return; // important: don't fall through
+        } else {
+            result = await invoke("scan_directory", { path });
+            // (your existing success handling stays the same)
+        }
 
         console.log('Scan result:', result);
 
@@ -477,7 +510,9 @@ scanBtn.addEventListener('click', async () => {
         statusMessage.className = 'error';
         console.error('Scan error:', error);
     } finally {
-        scanBtn.disabled = false;
+        if (!keepDisabled) {
+            scanBtn.disabled = false;
+        }
     }
 });
 
@@ -517,6 +552,66 @@ async function setDefaultPath() {
 
 setDefaultPath();
 console.log('Event listeners set up');
+
+let unlistenProgress = null;
+let unlistenDone = null;
+
+async function setupScanListeners() {
+    // Avoid double-registering if hot reload / dev
+    if (unlistenProgress) { await unlistenProgress(); unlistenProgress = null; }
+    if (unlistenDone) { await unlistenDone(); unlistenDone = null; }
+
+    unlistenProgress = await listen("scan_progress", (event) => {
+        const p = event.payload;
+        // Update status line / progress indicators
+        statusMessage.textContent =
+            `Scanning... jobs ${p.jobs_done}/${p.jobs_started} | errors ${p.errors} | discovered ${formatBytes(p.current_size)} | ${p.duration_ms} ms`;
+        statusMessage.className = "scanning";
+        errors.textContent = p.errors;
+
+        // Update stats panel and make it visible
+        totalSize.textContent = formatBytes(p.current_size);
+        if (p.fs_total) fsTotal.textContent = formatBytes(p.fs_total);
+        if (p.fs_free) freeSpace.textContent = formatBytes(p.fs_free);
+        duration.textContent = p.duration_ms + ' ms';
+        stats.classList.remove('hidden');
+
+        if (p.tree && p.root_id !== undefined) {
+            currentData = {
+                tree: p.tree,
+                root_id: p.root_id,
+                fs_total: p.fs_total,
+                fs_free: p.fs_free
+            };
+            currentRoot = p.root_id;
+            buildNodeMap(p.tree);
+            scheduleRender();
+        }
+    });
+
+    unlistenDone = await listen("scan_done", (event) => {
+        const result = event.payload;
+
+        currentData = result;
+        currentRoot = result.root_id;
+        buildNodeMap(result.tree);
+
+        totalSize.textContent = formatBytes(result.total_size);
+        freeSpace.textContent = result.fs_free ? formatBytes(result.fs_free) : "N/A";
+        fsTotal.textContent = result.fs_total ? formatBytes(result.fs_total) : "N/A";
+        duration.textContent = result.duration_ms + " ms";
+        errors.textContent = result.errors;
+
+        stats.classList.remove("hidden");
+        statusMessage.textContent = "Scan completed successfully";
+        statusMessage.className = "success";
+        scanBtn.disabled = false;
+
+        renderTreemap();
+    });
+}
+
+setupScanListeners().catch(console.error);
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {

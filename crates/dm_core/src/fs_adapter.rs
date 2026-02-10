@@ -39,6 +39,7 @@ impl FsAdapter for UnixFsAdapter {
     }
 }
 
+#[derive(Clone)]
 pub struct WindowsFsAdapter;
 
 impl FsAdapter for WindowsFsAdapter {
