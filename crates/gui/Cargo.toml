@@ -14,3 +14,8 @@ fs4 = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
+
+[lib]
+name = "dm_vibes_gui"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]

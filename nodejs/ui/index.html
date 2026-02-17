@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DM Vibes - Disk Space Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <div class="input-group">
+                <input type="text" id="pathInput" placeholder="Enter directory path">
+                <button id="browseBtn">Browse</button>
+                <button id="scanBtn" class="primary">Scan</button>
+            </div>
+            <div class="scan-options">
+                <label><input type="checkbox" id="parallelScan" checked> Parallel</label>
+                <label>Threads: <input type="number" id="threadCount" min="1" max="128" value="16"></label>
+                <label><input type="checkbox" id="showFreeSpace" checked> Show Free Space</label>
+            </div>
+        </div>
+
+        <div id="statusBar" class="status-bar">
+            <span id="statusMessage">Ready to scan</span>
+            <div id="stats" class="stats hidden">
+                <span class="stat">Used: <span id="totalSize">-</span></span>
+                <span class="stat">Free: <span id="freeSpace">-</span></span>
+                <span class="stat">Total: <span id="fsTotal">-</span></span>
+                <span class="stat">Time: <span id="duration">-</span></span>
+                <span class="stat">Errors: <span id="errors">-</span></span>
+            </div>
+        </div>
+
+        <div id="treemapContainer" class="treemap-container">
+            <div id="breadcrumb" class="breadcrumb hidden"></div>
+            <svg id="treemap"></svg>
+            <div id="shortcuts" class="shortcuts">
+                <span><kbd>Enter</kbd>/<kbd>Space</kbd> Scan</span>
+                <span><kbd>+</kbd> Zoom In</span>
+                <span><kbd>-</kbd>/<kbd>Backspace</kbd> Zoom Out</span>
+            </div>
+        </div>
+
+        <div id="tooltip" class="tooltip hidden"></div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>
