@@ -4,6 +4,8 @@ pub mod top_files;
 pub mod session;
 mod scanner;
 pub mod fs_adapter;
+pub mod scan_store;
+pub mod view;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
