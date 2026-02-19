@@ -7,8 +7,58 @@ console.log('Tauri API loaded:', { invoke, open });
 
 let currentData = null;
 let currentRoot = 0;
+let currentScanId = null;
+let scanComplete = false;
 let nodeMap = new Map();
 let renderPending = false;
+
+// Simple LRU Cache for views
+class LRUCache {
+    constructor(capacity) {
+        this.capacity = capacity;
+        this.cache = new Map();
+    }
+
+    get(key) {
+        if (!this.cache.has(key)) return null;
+        const value = this.cache.get(key);
+        this.cache.delete(key);
+        this.cache.set(key, value);
+        return value;
+    }
+
+    set(key, value) {
+        if (this.cache.has(key)) {
+            this.cache.delete(key);
+        } else if (this.cache.size >= this.capacity) {
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
+        this.cache.set(key, value);
+    }
+
+    clear() {
+        this.cache.clear();
+    }
+}
+
+const viewCache = new LRUCache(50);
+
+// Budget tier helper
+function getBudgetTier() {
+    const nodeCount = currentData?.total_nodes || 0;
+    console.log('Budget tier calculation - node count:', nodeCount);
+    if (nodeCount > 100000) {
+        console.log('Using beefy tier');
+        return 'beefy';
+    }
+    if (nodeCount < 20000 && nodeCount > 0) {
+        console.log('Using rescue tier');
+        return 'rescue';
+    }
+    console.log('Using normal tier');
+    return 'normal';
+}
 
 // DOM elements
 const pathInput = document.getElementById('pathInput');
@@ -52,6 +102,40 @@ function getColor(depth) {
     return colors[depth % colors.length];
 }
 
+// Fetch view from backend
+async function fetchView(rootId) {
+    if (!currentScanId) {
+        console.error('No scan ID available');
+        return null;
+    }
+
+    const cacheKey = `${currentScanId}:${rootId}:${getBudgetTier()}`;
+    const cached = viewCache.get(cacheKey);
+    if (cached) {
+        console.log('Using cached view for', rootId);
+        return cached;
+    }
+
+    try {
+        const view = await invoke('get_view', {
+            scanId: currentScanId,
+            rootId: rootId,
+            depth: 32,
+            budgetTier: getBudgetTier()
+        });
+        console.log('Fetched view for root', rootId, '- nodes:', view.nodes.length);
+        const rootNode = view.nodes.find(n => n.id === rootId);
+        if (rootNode) {
+            console.log('Root node children count:', rootNode.children.length);
+        }
+        viewCache.set(cacheKey, view);
+        return view;
+    } catch (error) {
+        console.error('Error fetching view:', error);
+        return null;
+    }
+}
+
 // Build node map
 function buildNodeMap(tree) {
     nodeMap.clear();
@@ -63,6 +147,21 @@ function buildNodeMap(tree) {
         }
     });
     console.log('Node map built, size:', nodeMap.size);
+
+    // Debug: show root node info
+    const rootNode = nodeMap.get(currentRoot);
+    if (rootNode && currentRoot !== null) {
+        console.log('Root node:', rootNode.id, rootNode.name, 'children:', rootNode.children.length);
+        console.log('Children IDs:', rootNode.children.slice(0, 10));
+        rootNode.children.slice(0, 10).forEach(childId => {
+            const child = nodeMap.get(childId);
+            if (child) {
+                console.log(`  Child ${childId}: ${child.name} (size: ${child.size})`);
+            } else {
+                console.log(`  Child ${childId}: NOT IN NODE MAP`);
+            }
+        });
+    }
 }
 
 // Get path from root to node
@@ -96,10 +195,10 @@ function renderBreadcrumb(nodeId) {
 
     // Add click handlers
     breadcrumb.querySelectorAll('span').forEach(span => {
-        span.addEventListener('click', () => {
+        span.addEventListener('click', async () => {
             const id = parseInt(span.dataset.id);
             currentRoot = id;
-            renderTreemap();
+            await renderTreemap();
         });
     });
 }
@@ -169,8 +268,19 @@ function layoutChildren(children, x, y, width, height) {
 }
 
 // Render treemap
-function renderTreemap() {
+async function renderTreemap() {
     if (!currentData) return;
+
+    // Only fetch view if scan is complete
+    if (scanComplete && currentScanId) {
+        const view = await fetchView(currentRoot);
+        if (!view) {
+            console.error('Failed to fetch view for root:', currentRoot);
+            return;
+        }
+        // Build node map from view
+        buildNodeMap(view.nodes);
+    }
 
     const rootNode = nodeMap.get(currentRoot);
     if (!rootNode) {
@@ -294,15 +404,15 @@ function renderNode(nodeId, x, y, width, height, depth) {
     const node = nodeMap.get(nodeId);
     if (!node || width < 1 || height < 1) return;
 
-    // Get children and files
+    // Get children and files (no cloning, just IDs and metadata)
     const items = [
         ...node.children
             .map(id => {
                 const childNode = nodeMap.get(id);
-                return childNode ? { ...childNode, isFolder: true } : null;
+                return childNode ? { id, size: childNode.size, name: childNode.name, isFolder: true, depth: childNode.depth } : null;
             })
             .filter(n => n && n.size > 0),
-        ...node.top_files.map(f => ({ ...f, isFile: true, depth: node.depth + 1 }))
+        ...node.top_files.map(f => ({ name: f.name, size: f.size, isFile: true, depth: node.depth + 1 }))
     ].sort((a, b) => b.size - a.size);
 
     const { layout, skipped } = layoutChildren(items, x, y, width, height);
@@ -329,11 +439,12 @@ function renderNode(nodeId, x, y, width, height, depth) {
 
         // Add click handler for folders
         if (item.isFolder) {
-            rect.addEventListener('click', (e) => {
+            rect.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                if (item.children && item.children.length > 0) {
+                const childNode = nodeMap.get(item.id);
+                if (childNode && childNode.children && childNode.children.length > 0) {
                     currentRoot = item.id;
-                    renderTreemap();
+                    await renderTreemap();
                 }
             });
         }
@@ -344,7 +455,9 @@ function renderNode(nodeId, x, y, width, height, depth) {
             let content = `<div class="name">${item.name}</div>
                 <div class="size">Size: ${formatBytes(item.size)}</div>`;
             if (item.isFolder) {
-                content += `<div class="size">Own: ${formatBytes(item.own_size)}</div>`;
+                const childNode = nodeMap.get(item.id);
+                const ownSize = childNode ? childNode.own_size : 0;
+                content += `<div class="size">Own: ${formatBytes(ownSize)}</div>`;
             }
             tooltip.innerHTML = content;
         });
@@ -453,6 +566,21 @@ scanBtn.addEventListener('click', async () => {
     statusMessage.textContent = 'Scanning directory...';
     statusMessage.className = 'scanning';
     stats.classList.add('hidden');
+
+    // Drop old scan session if exists
+    if (currentScanId) {
+        try {
+            await invoke('drop_scan', { scanId: currentScanId });
+            console.log('Dropped old scan session:', currentScanId);
+        } catch (error) {
+            console.warn('Failed to drop old scan session:', error);
+        }
+    }
+
+    // Reset scan state
+    scanComplete = false;
+    currentScanId = null;
+    viewCache.clear();
 
     let keepDisabled = false;
     try {
@@ -576,25 +704,57 @@ async function setupScanListeners() {
         duration.textContent = p.duration_ms + ' ms';
         stats.classList.remove('hidden');
 
+        // Store scan ID but mark scan as not complete
+        if (p.scan_id) {
+            currentScanId = p.scan_id;
+        }
+        scanComplete = false;
+
+        // For progress events, we use the lightweight tree if provided
         if (p.tree && p.root_id !== undefined) {
             currentData = {
-                tree: p.tree,
                 root_id: p.root_id,
                 fs_total: p.fs_total,
-                fs_free: p.fs_free
+                fs_free: p.fs_free,
+                total_size: p.current_size
             };
             currentRoot = p.root_id;
-            buildNodeMap(p.tree);
+
+            // Convert progress nodes to a format compatible with our rendering
+            const progressTree = p.tree.map(node => ({
+                id: node.id,
+                parent: node.parent,
+                name: node.name,
+                size: node.size,
+                own_size: node.own_size,
+                children: node.top_child_ids || [],
+                top_files: [],
+                depth: node.depth,
+                is_other: false
+            }));
+
+            buildNodeMap(progressTree);
             scheduleRender();
         }
     });
 
-    unlistenDone = await listen("scan_done", (event) => {
+    unlistenDone = await listen("scan_done", async (event) => {
         const result = event.payload;
 
-        currentData = result;
+        currentScanId = result.scan_id;
+        scanComplete = true; // Mark scan as complete
+        currentData = {
+            root_id: result.root_id,
+            total_size: result.total_size,
+            fs_total: result.fs_total,
+            fs_free: result.fs_free
+        };
         currentRoot = result.root_id;
-        buildNodeMap(result.tree);
+
+        // If rescue mode provided a tree, use it
+        if (result.tree) {
+            buildNodeMap(result.tree);
+        }
 
         totalSize.textContent = formatBytes(result.total_size);
         freeSpace.textContent = result.fs_free ? formatBytes(result.fs_free) : "N/A";
@@ -607,7 +767,10 @@ async function setupScanListeners() {
         statusMessage.className = "success";
         scanBtn.disabled = false;
 
-        renderTreemap();
+        // Clear cache for new scan
+        viewCache.clear();
+
+        await renderTreemap();
     });
 }
 
@@ -668,12 +831,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Helper function to zoom out
-function zoomOut() {
+async function zoomOut() {
     if (currentData && currentRoot !== null) {
         const currentNode = nodeMap.get(currentRoot);
+        console.log('Zoom out - current node:', currentNode);
         if (currentNode && currentNode.parent !== null && currentNode.parent !== undefined) {
+            console.log('Navigating to parent:', currentNode.parent);
             currentRoot = currentNode.parent;
-            renderTreemap();
+            await renderTreemap();
+        } else {
+            console.log('No parent available - current root:', currentRoot, 'parent:', currentNode?.parent);
         }
     }
 }

@@ -1,10 +1,16 @@
 use std::fmt::Debug;
 use crate::model::{NodeId, Node, ResourceName};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tree {
     root: NodeId,
     nodes: Vec<Node>
+}
+
+impl Tree {
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
 }
 
 impl Tree {

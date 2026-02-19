@@ -2,14 +2,14 @@ use crate::top_files::TopKFiles;
 pub type NodeId = usize;
 pub type ResourceName = String;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NodeState {
     Unseen,
     Partial,
     Complete
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     id: NodeId,
     parent: Option<NodeId>,
