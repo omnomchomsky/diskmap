@@ -1,16 +1,16 @@
 
 
 [workspace]
+resolver = "3"
 members = [
     "crates/dm_core",
-    "crates/cli"
-, "crates/gui"]
+    "crates/cli",
+    "crates/gui"
+]
 
 [workspace.dependencies]
 clap = { version = "4", features = ["derive"]}
 fs4 = "0.13.1"
-
-resolver = "2"
 
 [profile.release]
 opt-level = "z"

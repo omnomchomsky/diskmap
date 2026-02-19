@@ -7,7 +7,7 @@ use crate::scanner::{scan_one_dir, ScanEvent, ScanJob};
 use crate::tree::Tree;
 use crate::model::{NodeId, ResourceName};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Session {
     pub tree: Tree,
     queue: VecDeque<ScanJob>,

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use crate::model::{NodeId, Node, ResourceName};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Tree {
     root: NodeId,
     nodes: Vec<Node>
@@ -32,9 +32,5 @@ impl Tree {
 
     pub fn root(&self) -> NodeId {
         self.root
-    }
-
-    pub fn len(&self) -> usize {
-        self.nodes.len()
     }
 }

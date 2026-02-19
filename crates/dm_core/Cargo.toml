@@ -6,4 +6,3 @@ edition = "2024"
 [dependencies]
 clap = { workspace = true }
 crossbeam-channel = "0.5"
-serde = { version = "1.0.228", features = ["derive"] }
